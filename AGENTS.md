@@ -6,6 +6,11 @@
 - Python: `/home/xiaozhu/.espressif/tools/python/v5.5.4/venv/bin/python`
 - idf.py: `/home/xiaozhu/.espressif/v5.5.4/esp-idf/tools/idf.py`
 
+**使用前先加载环境变量：**
+```bash
+source /home/xiaozhu/.espressif/v5.5.4/esp-idf/export.sh
+```
+
 ## 常用命令
 ```bash
 # 编译
