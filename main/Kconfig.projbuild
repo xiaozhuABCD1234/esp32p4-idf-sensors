@@ -1,20 +1,88 @@
-menu "WiFi Configuration"
-    config WIFI_SSID
-        string "WiFi SSID"
-        default "myssid"
-    config WIFI_PASSWORD
-        string "WiFi Password"
-        default "mypassword"
-endmenu
+menu "Project Configuration"
 
-menu "MQTT Configuration"
-    config MQTT_BROKER_URI
-        string "Broker URI"
-        default "ws://broker.emqx.io:8083/mqtt"
-    config MQTT_TOPIC
-        string "Publish Topic"
-        default "/sensors/sht30"
-    config MQTT_PUBLISH_INTERVAL
-        int "Publish Interval (s)"
-        default 10
+    menu "WiFi Configuration"
+        config WIFI_SSID
+            string "WiFi SSID"
+            default "myssid"
+            help
+                SSID of the Wi-Fi access point to connect to.
+
+        config WIFI_PASSWORD
+            string "WiFi Password"
+            default "mypassword"
+            help
+                Password for the Wi-Fi access point.
+    endmenu
+
+    menu "MQTT Configuration"
+        config MQTT_BROKER_URI
+            string "Broker URI"
+            default "ws://broker.emqx.io:8083/mqtt"
+            help
+                MQTT broker connection URI.
+                Supports tcp://, mqtt://, ssl://, ws://, wss:// schemes.
+
+        config MQTT_PUBLISH_INTERVAL
+            int "Publish Interval (s)"
+            default 10
+            range 1 3600
+            help
+                Interval in seconds between timed sensor data publications.
+                Only used when a sensor is in "Timed" publish mode.
+    endmenu
+
+    menu "SHT30 Configuration"
+        config MQTT_TOPIC
+            string "Publish Topic"
+            default "/sensors/sht30"
+            help
+                MQTT topic for SHT30 temperature and humidity data.
+
+        choice SHT30_PUBLISH_MODE
+            prompt "Publish Mode"
+            default SHT30_PUBLISH_TIMED
+            help
+                Controls when SHT30 data is published via MQTT.
+
+        config SHT30_PUBLISH_TIMED
+            bool "Timed (publish at MQTT interval)"
+            help
+                SHT30 data is buffered and published periodically
+                according to the configured MQTT publish interval.
+
+        config SHT30_PUBLISH_IMMEDIATE
+            bool "Immediate (publish on each sensor frame)"
+            help
+                SHT30 data is published immediately upon receiving
+                each sensor reading frame.
+        endchoice
+    endmenu
+
+    menu "CJ702 Configuration"
+        config CJ702_TOPIC
+            string "Publish Topic"
+            default "/sensors/cj702"
+            help
+                MQTT topic for CJ702 air quality sensor data.
+
+        choice CJ702_PUBLISH_MODE
+            prompt "Publish Mode"
+            default CJ702_PUBLISH_TIMED
+            help
+                Controls when CJ702 data is published via MQTT.
+
+        config CJ702_PUBLISH_TIMED
+            bool "Timed (publish at MQTT interval)"
+            help
+                CJ702 data is buffered and published periodically
+                according to the configured MQTT publish interval.
+
+        config CJ702_PUBLISH_IMMEDIATE
+            bool "Immediate (publish on each sensor frame)"
+            help
+                CJ702 data is published immediately upon receiving
+                each sensor data frame.
+        endchoice
+    endmenu
+
 endmenu
