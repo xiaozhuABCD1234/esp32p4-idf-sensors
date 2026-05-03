@@ -3,6 +3,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
+#include "freertos/semphr.h"
+#include "freertos/event_groups.h"
 #include "driver/uart.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
@@ -10,9 +12,11 @@
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_netif.h"
+#include "mqtt_client.h"
 
 static const char *TAG = "SHT30";
 static const char *TAG_WIFI = "WiFi";
+static const char *TAG_MQTT = "MQTT";
 
 #define SHT30_UART      UART_NUM_1
 #define TXD_PIN         4
@@ -36,11 +40,18 @@ static void uart_init(void)
     ESP_ERROR_CHECK(uart_driver_install(SHT30_UART, BUF_SIZE, BUF_SIZE, 10, &uart_queue, 0));
 }
 
+static float s_humidity, s_temperature;
+static SemaphoreHandle_t s_data_mutex;
+
 static void parse_sht30_data(const char *str)
 {
     float humidity = 0, temperature = 0;
     if (sscanf(str, "R:%fRH %fC", &humidity, &temperature) == 2) {
         ESP_LOGI(TAG, "Humidity: %.1f%%RH, Temperature: %.1fC", humidity, temperature);
+        xSemaphoreTake(s_data_mutex, portMAX_DELAY);
+        s_humidity = humidity;
+        s_temperature = temperature;
+        xSemaphoreGive(s_data_mutex);
     } else {
         ESP_LOGW(TAG, "Parse failed: %s", str);
     }
@@ -100,6 +111,69 @@ static void wifi_init_sta(void)
     ESP_LOGI(TAG_WIFI, "Connecting to AP...");
 }
 
+static EventGroupHandle_t mqtt_event_group;
+#define MQTT_CONNECTED_BIT BIT0
+
+static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
+                                int32_t event_id, void *event_data)
+{
+    esp_mqtt_event_handle_t event = event_data;
+    esp_mqtt_client_handle_t client = event->client;
+
+    switch ((esp_mqtt_event_id_t)event_id) {
+    case MQTT_EVENT_CONNECTED:
+        ESP_LOGI(TAG_MQTT, "Connected to broker");
+        xEventGroupSetBits(mqtt_event_group, MQTT_CONNECTED_BIT);
+        break;
+    case MQTT_EVENT_DISCONNECTED:
+        ESP_LOGI(TAG_MQTT, "Disconnected from broker");
+        xEventGroupClearBits(mqtt_event_group, MQTT_CONNECTED_BIT);
+        break;
+    case MQTT_EVENT_PUBLISHED:
+        ESP_LOGD(TAG_MQTT, "Publish acknowledged, msg_id=%d", event->msg_id);
+        break;
+    case MQTT_EVENT_ERROR:
+        ESP_LOGE(TAG_MQTT, "MQTT error");
+        break;
+    default:
+        break;
+    }
+}
+
+static void mqtt_publish_task(void *pvParameters)
+{
+    xEventGroupWaitBits(wifi_event_group, WIFI_CONNECTED_BIT, false, true, portMAX_DELAY);
+
+    mqtt_event_group = xEventGroupCreate();
+
+    esp_mqtt_client_config_t mqtt_cfg = {
+        .broker.address.uri = CONFIG_MQTT_BROKER_URI,
+    };
+    esp_mqtt_client_handle_t client = esp_mqtt_client_init(&mqtt_cfg);
+    esp_mqtt_client_register_event(client, ESP_EVENT_ANY_ID, mqtt_event_handler, NULL);
+    esp_mqtt_client_start(client);
+
+    xEventGroupWaitBits(mqtt_event_group, MQTT_CONNECTED_BIT, false, true, portMAX_DELAY);
+
+    char topic[64];
+    const char *base_topic = CONFIG_MQTT_TOPIC;
+    int interval = CONFIG_MQTT_PUBLISH_INTERVAL * 1000;
+
+    while (1) {
+        xSemaphoreTake(s_data_mutex, portMAX_DELAY);
+        float h = s_humidity;
+        float t = s_temperature;
+        xSemaphoreGive(s_data_mutex);
+
+        char json[64];
+        snprintf(json, sizeof(json), "{\"humidity\":%.1f,\"temperature\":%.1f}", h, t);
+        int msg_id = esp_mqtt_client_publish(client, base_topic, json, 0, 1, 0);
+        ESP_LOGI(TAG_MQTT, "Published to %s: %s (msg_id=%d)", base_topic, json, msg_id);
+
+        vTaskDelay(pdMS_TO_TICKS(interval));
+    }
+}
+
 void app_main(void)
 {
     esp_err_t ret = nvs_flash_init();
@@ -115,8 +189,12 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     wifi_init_sta();
 
+    s_data_mutex = xSemaphoreCreateMutex();
+
     uart_init();
     uart_write_bytes(SHT30_UART, "Auto\r\n", 6);
+
+    xTaskCreate(mqtt_publish_task, "mqtt_pub", 8192, NULL, 5, NULL);
 
     uint8_t data[RD_BUF_SIZE];
     uart_event_t event;

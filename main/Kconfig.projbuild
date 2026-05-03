@@ -6,3 +6,15 @@ menu "WiFi Configuration"
         string "WiFi Password"
         default "mypassword"
 endmenu
+
+menu "MQTT Configuration"
+    config MQTT_BROKER_URI
+        string "Broker URI"
+        default "ws://broker.emqx.io:8083/mqtt"
+    config MQTT_TOPIC
+        string "Publish Topic"
+        default "/sensors/sht30"
+    config MQTT_PUBLISH_INTERVAL
+        int "Publish Interval (s)"
+        default 10
+endmenu
